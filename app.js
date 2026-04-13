@@ -817,9 +817,14 @@ async function handleDeleteMenu(id, resId) {
 
 async function loadAdminSummary() {
     try {
-        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: CONFIG.RANGES.ORDERS });
+        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
         let rows = response.result.values || [];
-        const todayRows = rows.filter(row => row[1] === STATE.todayDateStr && row[3] === DOM.todayResName.textContent);
+        const todayRows = rows.filter(row => {
+            const resNameRaw = row[3] || '';
+            const isHeader = (row[0] || '').toLowerCase().includes('order');
+            if (isHeader) return false;
+            return resNameRaw === DOM.todayResName.textContent;
+        });
 
         let summary = `【${DOM.todayResName.textContent} 點餐明細】\n`;
         let grandTotal = 0;
@@ -832,7 +837,7 @@ async function loadAdminSummary() {
         summary += `\n結算總金額：$${grandTotal}`;
         DOM.orderSummaryText.value = summary;
         DOM.orderSummaryText.classList.remove('hidden');
-    } catch (e) { }
+    } catch (e) { console.error('Admin summary Error:', e); }
 }
 
 DOM.btnCopySummary.addEventListener('click', () => {
@@ -843,15 +848,21 @@ DOM.btnCopySummary.addEventListener('click', () => {
 });
 
 DOM.btnClearOld.addEventListener('click', async () => {
-    if (!confirm('這將刪除所有「非今日」或「非當前餐廳」的訂單，確定嗎？')) return;
+    if (!confirm('這將清除「非當前餐廳」以外的所有訂單，確定嗎？')) return;
     DOM.btnClearOld.disabled = true;
     try {
         const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
         let rows = response.result.values || [];
-        const keepRows = rows.filter((row, i) => i === 0 || (row[1] === STATE.todayDateStr));
+        const keepRows = rows.filter((row, i) => {
+            const isHeader = i === 0 || (row[0] || '').toLowerCase().includes('order');
+            if (isHeader) return true;
+            const resNameRaw = row[3] || '';
+            return resNameRaw === DOM.todayResName.textContent;
+        });
 
         await syncWholeSheet('Orders!A:H', keepRows[0] || ['OrderID', 'Date', 'UserName', 'RestaurantName', 'ItemName', 'CustomizationDetails', 'Quantity', 'TotalPrice'], keepRows.slice(1));
         showToast('清理完成');
+        loadAdminSummary();
     } catch (err) {
         showToast('清理失敗', true);
     } finally {
