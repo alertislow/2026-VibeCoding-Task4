@@ -22,20 +22,8 @@
         <p class="subtitle">歡迎來到內部專屬點餐小工具</p>
         
         <div class="login-form">
-            <div class="form-group">
-                <label for="user-name">您的稱呼</label>
-                <input type="text" id="user-name" placeholder="請輸入姓名 (例如: 王大明)">
-            </div>
-            <div class="form-group">
-                <label for="role-select">選擇身分</label>
-                <select id="role-select">
-                    <option value="user">我要點餐 (點餐者)</option>
-                    <option value="admin">我是管理者</option>
-                </select>
-            </div>
-            
-            <button id="auth-btn" class="primary-btn">
-                <span class="btn-text">登入 Google 帳號並進入系統</span>
+            <button id="auth-btn" class="primary-btn" style="margin-top: 20px;">
+                <span class="btn-text">使用 Google 帳號授權登入</span>
                 <div class="loader hidden"></div>
             </button>
         </div>
@@ -51,6 +39,7 @@
                     <span id="display-role" class="badge"></span>
                     <span id="display-name"></span>
                 </div>
+                <div id="display-email" class="text-sm" style="margin-top:5px; padding-left:2px;"></div>
             </div>
             <nav class="sidebar-nav">
                 <button class="nav-btn active" data-target="dashboard">
@@ -63,10 +52,10 @@
                 </button>
                 <button class="nav-btn admin-only hidden" data-target="admin-panel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                    管理員控制台
+                    後台管理區
                 </button>
             </nav>
-            <button id="logout-btn" class="nav-btn logout">登出</button>
+            <button id="logout-btn" class="nav-btn logout">登出系統</button>
         </aside>
 
         <!-- 主內容區 -->
@@ -119,37 +108,66 @@
             </section>
 
             <!-- 管理員面板 -->
-            <section id="admin-panel" class="view-section hidden admin-only">
+            <section id="admin-panel" class="view-section hidden admin-only" style="overflow-y: auto;">
                 <header class="section-header">
-                    <h2>管理控制台</h2>
+                    <h2>這家系統您說得算！</h2>
+                    <p class="subtitle">所有異動將直接寫回 Google 試算表。</p>
                 </header>
+                
                 <div class="admin-grid">
-                    <div class="admin-card glass-panel">
-                        <h3>設定今日餐廳</h3>
-                        <p class="text-sm">選擇要開放給大家點單的店家</p>
-                        <select id="admin-restaurant-select" class="form-control" style="margin-top: 10px;">
-                            <option value="">載入中...</option>
-                        </select>
-                        <button id="btn-save-restaurant" class="secondary-btn" style="margin-top: 15px;">儲存並發布</button>
+                    <!-- 今日開放設定 -->
+                    <div class="admin-card glass-panel" style="grid-column: 1 / -1;">
+                        <h3>當前開放點餐：設定今日餐廳</h3>
+                        <div style="display:flex; gap:10px; margin-top:10px; align-items:center;">
+                            <select id="admin-restaurant-select" class="form-control" style="flex:1;">
+                                <option value="">載入中...</option>
+                            </select>
+                            <button id="btn-save-restaurant" class="secondary-btn">切換並發布</button>
+                        </div>
                     </div>
 
+                    <!-- 餐廳清單設定 (CRUD) -->
                     <div class="admin-card glass-panel">
-                        <h3>維護餐廳與餐點資料</h3>
-                        <p class="text-sm">因為資料較多，請直接前往試算表介面維護</p>
-                        <a id="btn-open-gsheet" href="#" target="_blank" class="secondary-btn" style="display:inline-block; margin-top: 15px; text-decoration: none; text-align:center;">前往 Google 表單管理資料</a>
+                        <h3>🍽️ 餐廳管理</h3>
+                        <div style="display:flex; gap:5px; margin-top: 10px;">
+                            <input type="text" id="new-res-name" placeholder="新增的餐廳名稱" style="flex:1;">
+                            <button id="btn-add-res" class="secondary-btn">新增</button>
+                        </div>
+                        <ul id="admin-res-list" class="crud-list" style="margin-top:15px;">
+                            <!-- js injected -->
+                        </ul>
                     </div>
+
+                    <!-- 餐點清單設定 (CRUD) -->
+                    <div class="admin-card glass-panel">
+                        <h3>📋 菜單管理</h3>
+                        <select id="admin-menu-res-select" class="form-control" style="margin-top:10px;">
+                            <option value="">選擇要編輯菜單的餐廳...</option>
+                        </select>
+                        <div id="admin-menu-editor" class="hidden" style="margin-top:15px;">
+                            <div class="crud-form" style="background:rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                                <h4>新增餐點</h4>
+                                <input type="text" id="new-menu-name" placeholder="餐點名稱" style="margin-bottom:8px;">
+                                <input type="number" id="new-menu-price" placeholder="價格 (純數字)" style="margin-bottom:8px;">
+                                <input type="text" id="new-menu-custom" placeholder="客製化 (例如 甜度:正常,半糖;冰塊:正常,去冰)" class="text-sm">
+                                <button id="btn-add-menu" class="secondary-btn" style="width:100%; margin-top:10px;">新增餐點</button>
+                            </div>
+                            <ul id="admin-menu-list" class="crud-list">
+                                <!-- js injected -->
+                            </ul>
+                        </div>
+                    </div>
+
 
                     <div class="admin-card glass-panel" style="grid-column: 1 / -1;">
-                        <h3>收費小幫手</h3>
-                        <p class="text-sm">複製以下純文字明細，方便去 LINE 群組催繳便當錢</p>
-                        <textarea id="order-summary-text" class="form-control" rows="6" readonly style="margin-top: 10px; font-family: monospace;"></textarea>
-                        <button id="btn-copy-summary" class="primary-btn" style="margin-top: 10px;">一鍵複製明細</button>
-                    </div>
-
-                    <div class="admin-card glass-panel danger-zone">
-                        <h3>清理資料</h3>
-                        <p class="text-sm">如果你覺得試算表紀錄太多了，可以清除「非今日」所有的歷史訂單以保持系統輕量。</p>
-                        <button id="btn-clear-old" class="danger-btn" style="margin-top: 15px;">刪除非今日舊紀錄</button>
+                        <h3>收費小幫手 & 資料管理</h3>
+                        <button id="btn-copy-summary" class="primary-btn" style="margin-top: 10px;">一鍵複製今日名細</button>
+                        <textarea id="order-summary-text" class="form-control hidden" rows="2" readonly></textarea>
+                        
+                        <div style="margin-top: 25px; padding-top: 15px; border-top: 1px dashed var(--glass-border);">
+                            <p class="text-sm">覺得試算表紀錄太多了？清除「過往的歷史訂單以保持系統順暢。</p>
+                            <button id="btn-clear-old" class="danger-btn" style="margin-top: 10px;">刪除非今日舊紀錄</button>
+                        </div>
                     </div>
                 </div>
             </section>

@@ -2,14 +2,13 @@ import { CONFIG } from './config.js';
 
 // ---- 全局狀態 ----
 const STATE = {
-    user: { name: '', role: 'user' }, // role: 'user' | 'admin'
+    user: { name: '', email: '', role: 'user' },
     tokenClient: null,
-    accessToken: null,
     settings: {}, // { TodayRestaurant: 'R01' }
-    restaurants: {}, // { R01: 'McDonalds' }
-    menu: [],
+    restaurants: [], // [{ id: 'R01', name: 'Mac' }]
+    menu: [], // [{id, resId, name, price, customizations}]
     todayDateStr: new Date().toISOString().split('T')[0],
-    currentOrderItem: null // 正在點擊的餐點資料
+    currentOrderItem: null
 };
 
 // ---- DOM 節點 ----
@@ -17,14 +16,13 @@ const DOM = {
     loginView: document.getElementById('login-container'),
     appView: document.getElementById('app-container'),
     authBtn: document.getElementById('auth-btn'),
-    userNameInput: document.getElementById('user-name'),
-    roleSelect: document.getElementById('role-select'),
     loader: document.querySelector('.loader'),
     btnText: document.querySelector('.btn-text'),
     logoutBtn: document.getElementById('logout-btn'),
 
     displayRole: document.getElementById('display-role'),
     displayName: document.getElementById('display-name'),
+    displayEmail: document.getElementById('display-email'),
 
     navBtns: document.querySelectorAll('.nav-btn[data-target]'),
     sections: document.querySelectorAll('.view-section'),
@@ -55,10 +53,23 @@ const DOM = {
     // admin panel
     adminResSelect: document.getElementById('admin-restaurant-select'),
     btnSaveRes: document.getElementById('btn-save-restaurant'),
-    btnOpenGSheet: document.getElementById('btn-open-gsheet'),
-    orderSummaryText: document.getElementById('order-summary-text'),
     btnCopySummary: document.getElementById('btn-copy-summary'),
-    btnClearOld: document.getElementById('btn-clear-old')
+    orderSummaryText: document.getElementById('order-summary-text'),
+    btnClearOld: document.getElementById('btn-clear-old'),
+
+    // Admin CRUD - Res
+    newResName: document.getElementById('new-res-name'),
+    btnAddRes: document.getElementById('btn-add-res'),
+    adminResList: document.getElementById('admin-res-list'),
+
+    // Admin CRUD - Menu
+    adminMenuResSelect: document.getElementById('admin-menu-res-select'),
+    adminMenuEditor: document.getElementById('admin-menu-editor'),
+    newMenuName: document.getElementById('new-menu-name'),
+    newMenuPrice: document.getElementById('new-menu-price'),
+    newMenuCustom: document.getElementById('new-menu-custom'),
+    btnAddMenu: document.getElementById('btn-add-menu'),
+    adminMenuList: document.getElementById('admin-menu-list')
 };
 
 // ---- 工具函數 ----
@@ -90,72 +101,123 @@ const switchView = (targetId) => {
     });
 
     if (targetId === 'orders-view') loadTodayOrders();
-    if (targetId === 'admin-panel') loadAdminSummary();
+    if (targetId === 'admin-panel') renderAdminPanel();
 };
 
-// ---- 初始化與認證 ----
+function generateId(prefix) {
+    return prefix + Math.floor(Math.random() * 1000000);
+}
+
+// ---- 初始化與認證 (與 localStorage) ----
 function initGoogleAPI() {
-    // 給予日期顯示
     const d = new Date();
     DOM.dateDisplay.textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 菜單清單`;
-
-    DOM.btnOpenGSheet.href = `https://docs.google.com/spreadsheets/d/${CONFIG.SPREADSHEET_ID}/edit`;
 
     STATE.tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CONFIG.CLIENT_ID,
         scope: CONFIG.SCOPES,
-        callback: (tokenResponse) => {
+        callback: async (tokenResponse) => {
             if (tokenResponse && tokenResponse.access_token) {
-                STATE.accessToken = tokenResponse.access_token;
-                gapi.load('client', startApp);
+                const token = tokenResponse.access_token;
+                // 到期時間約 3599 秒
+                const expiresAt = new Date().getTime() + (tokenResponse.expires_in * 1000);
+                
+                try {
+                    // Fetch user info with token
+                    const userInfoResp = await fetch(`https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=${token}`);
+                    const userInfo = await userInfoResp.json();
+                    
+                    const sessionData = {
+                        token: token,
+                        expiresAt: expiresAt,
+                        email: userInfo.email,
+                        name: userInfo.name || userInfo.email.split('@')[0]
+                    };
+                    localStorage.setItem('vibe_session', JSON.stringify(sessionData));
+                    loadSessionAndStartApp(sessionData);
+
+                } catch(e) {
+                    setLoading(false);
+                    showToast('獲取 Google 帳戶資訊失敗', true);
+                }
+            } else {
+                setLoading(false);
             }
         },
     });
+
+    checkPersistedSession();
 }
 window.onload = initGoogleAPI; // 等候 gapi script 載入
 
+async function checkPersistedSession() {
+    const sessionStr = localStorage.getItem('vibe_session');
+    if (sessionStr) {
+        const session = JSON.parse(sessionStr);
+        if (new Date().getTime() < session.expiresAt) {
+            // Token is still valid, bypass explicit login
+            setLoading(true);
+            loadSessionAndStartApp(session);
+            return;
+        } else {
+            localStorage.removeItem('vibe_session');
+        }
+    }
+}
+
 DOM.authBtn.addEventListener('click', () => {
-    const name = DOM.userNameInput.value.trim();
-    if (!name) return showToast('請輸入您的稱呼！', true);
-    STATE.user.name = name;
-    STATE.user.role = DOM.roleSelect.value;
-    
     setLoading(true);
     STATE.tokenClient.requestAccessToken({prompt: ''});
 });
 
-async function startApp() {
-    try {
-        await gapi.client.init({
-            discoveryDocs: CONFIG.DISCOVERY_DOCS,
-        });
-        gapi.client.setToken({ access_token: STATE.accessToken });
-        
-        // 介面轉換
-        DOM.loginView.classList.add('hidden');
-        DOM.appView.classList.remove('hidden');
-        DOM.displayName.textContent = STATE.user.name;
-        DOM.displayRole.textContent = STATE.user.role === 'admin' ? '管理員' : '一般用戶';
-        
-        if (STATE.user.role === 'admin') {
-            DOM.adminOnlyEls.forEach(el => el.classList.remove('hidden'));
-        } else {
-            DOM.adminOnlyEls.forEach(el => el.classList.add('hidden'));
-            // 避免一般用戶強制切換
-            DOM.navBtns.forEach(btn => {
-                if(btn.dataset.target === 'admin-panel') btn.style.display = 'none';
-            })
+async function loadSessionAndStartApp(sessionData) {
+    STATE.user.name = sessionData.name;
+    STATE.user.email = sessionData.email;
+    
+    // Check role by email
+    STATE.user.role = CONFIG.ADMIN_EMAILS.includes(sessionData.email) ? 'admin' : 'user';
+
+    gapi.load('client', async () => {
+        try {
+            await gapi.client.init({
+                discoveryDocs: CONFIG.DISCOVERY_DOCS,
+            });
+            gapi.client.setToken({ access_token: sessionData.token });
+            
+            // 介面轉換
+            DOM.loginView.classList.add('hidden');
+            DOM.appView.classList.remove('hidden');
+            DOM.displayName.textContent = STATE.user.name;
+            DOM.displayEmail.textContent = STATE.user.email;
+            DOM.displayRole.textContent = STATE.user.role === 'admin' ? '管理員' : '一般用戶';
+            
+            if (STATE.user.role === 'admin') {
+                DOM.adminOnlyEls.forEach(el => el.classList.remove('hidden'));
+            } else {
+                DOM.adminOnlyEls.forEach(el => el.classList.add('hidden'));
+                DOM.navBtns.forEach(btn => {
+                    if(btn.dataset.target === 'admin-panel') btn.style.display = 'none';
+                });
+            }
+
+            await fetchData();
+        } catch (err) {
+            setLoading(false);
+            localStorage.removeItem('vibe_session');
+            showToast('初始化連線失敗，請重新登入', true);
+            console.error(err);
         }
-
-        // 載入資料
-        await fetchData();
-
-    } catch (err) {
-        setLoading(false);
-        showToast('初始化失敗，請檢查 API 設定與試算表權限。', true);
-        console.error(err);
-    }
+    });
 }
+
+DOM.logoutBtn.addEventListener('click', () => {
+    DOM.appView.classList.add('hidden');
+    DOM.loginView.classList.remove('hidden');
+    gapi.client.setToken('');
+    localStorage.removeItem('vibe_session');
+    setLoading(false);
+    showToast('已登出');
+});
 
 // ---- 資料存取 ----
 async function fetchData() {
@@ -170,20 +232,15 @@ async function fetchData() {
         // Parse Settings
         let settingsRows = valueRanges[0].values || [];
         STATE.settings = {};
-        settingsRows.forEach(row => {
-            if (row[0]) STATE.settings[row[0]] = row[1] || '';
-        });
+        settingsRows.forEach(row => { if (row[0]) STATE.settings[row[0]] = row[1] || ''; });
 
-        // Parse Restaurants
+        // Parse Restaurants array
         let resRows = valueRanges[1].values || [];
-        STATE.restaurants = {};
-        resRows.forEach(row => {
-            if (row[0]) STATE.restaurants[row[0]] = row[1] || '';
-        });
+        STATE.restaurants = resRows.filter(r=>r[0]).map(row => ({ id: row[0], name: row[1] }));
 
-        // Parse Menu
+        // Parse Menu array
         let menuRows = valueRanges[2].values || [];
-        STATE.menu = menuRows.map(row => ({
+        STATE.menu = menuRows.filter(r=>r[0]).map(row => ({
             id: row[0],
             resId: row[1],
             name: row[2],
@@ -192,11 +249,15 @@ async function fetchData() {
         }));
 
         renderDashboard();
-        renderAdminPanel();
     } catch (err) {
-        showToast('載入資料失敗', true);
+        showToast('載入資料失敗，若為首次使用可能您試算表無預期資料格式', true);
         console.error(err);
     }
+}
+
+function getResName(id) {
+    const match = STATE.restaurants.find(r => r.id === id);
+    return match ? match.name : id;
 }
 
 // ---- 首頁點餐渲染 ----
@@ -210,7 +271,7 @@ function renderDashboard() {
         return;
     }
 
-    DOM.todayResName.textContent = STATE.restaurants[todayResId] || todayResId;
+    DOM.todayResName.textContent = getResName(todayResId);
     
     const todayMenu = STATE.menu.filter(m => m.resId === todayResId);
     if (todayMenu.length === 0) {
@@ -244,10 +305,8 @@ function openOrderModal(item) {
     DOM.remarksInput.value = '';
     updateModalPrice();
 
-    // 處理客製化
     DOM.customizationsContainer.innerHTML = '';
     if (item.customizations) {
-        // 解析格式: 甜度:正常甜,少糖,無糖;冰塊:正常冰,少冰
         const groups = item.customizations.split(';');
         groups.forEach(g => {
             const parts = g.split(':');
@@ -287,9 +346,7 @@ DOM.qtyPlus.addEventListener('click', () => { DOM.qtyInput.value = parseInt(DOM.
 DOM.qtyMinus.addEventListener('click', () => { if(DOM.qtyInput.value > 1) { DOM.qtyInput.value = parseInt(DOM.qtyInput.value) - 1; updateModalPrice(); }});
 DOM.qtyInput.addEventListener('change', updateModalPrice);
 
-DOM.modalClose.addEventListener('click', () => {
-    DOM.orderModal.classList.add('hidden');
-});
+DOM.modalClose.addEventListener('click', () => { DOM.orderModal.classList.add('hidden'); });
 
 DOM.btnSubmitOrder.addEventListener('click', async () => {
     if (!STATE.currentOrderItem) return;
@@ -298,11 +355,8 @@ DOM.btnSubmitOrder.addEventListener('click', async () => {
     const total = qty * item.price;
     const remarks = DOM.remarksInput.value.trim();
     
-    // 收集客製化
     let customArr = [];
-    document.querySelectorAll('.custom-select').forEach(sel => {
-        customArr.push(`${sel.value}`);
-    });
+    document.querySelectorAll('.custom-select').forEach(sel => customArr.push(`${sel.value}`));
     let customText = customArr.join(' / ');
     if (remarks) customText += ` (備註: ${remarks})`;
 
@@ -350,13 +404,8 @@ async function loadTodayOrders() {
         });
         
         let rows = response.result.values || [];
-        // [OrderID, Date, UserName, ResName, ItemName, Custom, Qty, Total]
+        let myTotal = 0; let allTotal = 0; let tableHTML = '';
         
-        let myTotal = 0;
-        let allTotal = 0;
-        let tableHTML = '';
-        
-        // 過濾今日
         const todayRows = rows.filter(row => row[1] === STATE.todayDateStr && row[3] === DOM.todayResName.textContent);
         
         todayRows.forEach(row => {
@@ -369,120 +418,212 @@ async function loadTodayOrders() {
             allTotal += cost;
             if (userName === STATE.user.name) myTotal += cost;
             
-            tableHTML += `
-                <tr>
-                    <td>${userName}</td>
-                    <td>${itemName}</td>
-                    <td class="text-sm">${custom}</td>
-                    <td>${qty}</td>
-                    <td class="highlight">$${cost}</td>
-                </tr>
-            `;
+            tableHTML += `<tr><td>${userName}</td><td>${itemName}</td><td class="text-sm">${custom}</td><td>${qty}</td><td class="highlight">$${cost}</td></tr>`;
         });
         
-        if (todayRows.length === 0) {
-            tableHTML = '<tr><td colspan="5" style="text-align:center;">今日尚無人點餐。</td></tr>';
-        }
+        if (todayRows.length === 0) tableHTML = '<tr><td colspan="5" style="text-align:center;">今日尚無人點餐。</td></tr>';
         
         DOM.ordersTableBody.innerHTML = tableHTML;
         DOM.myTotalCost.textContent = `$${myTotal}`;
         DOM.allTotalCost.textContent = `$${allTotal}`;
-
     } catch (err) {
         DOM.ordersTableBody.innerHTML = '<tr><td colspan="5">載入錯誤</td></tr>';
-        console.error(err);
     }
 }
 
-// ---- 管理員邏輯 ----
-function renderAdminPanel() {
-    DOM.adminResSelect.innerHTML = '<option value="">請選擇餐廳</option>';
-    Object.keys(STATE.restaurants).forEach(id => {
-        const opt = document.createElement('option');
-        opt.value = id;
-        opt.textContent = STATE.restaurants[id];
-        if (STATE.settings['TodayRestaurant'] === id) opt.selected = true;
-        DOM.adminResSelect.appendChild(opt);
+// ---- 管理員核心：與試算表全覆寫 (CRUD Helper) ----
+async function syncWholeSheet(range, headerRow, dataArray) {
+    // dataArray parameter format: [ ["col1", "col2"...] ... ]
+    const finalData = [headerRow, ...dataArray];
+    // Clear
+    await gapi.client.sheets.spreadsheets.values.clear({
+        spreadsheetId: CONFIG.SPREADSHEET_ID,
+        range: range
+    });
+    // Update
+    await gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: CONFIG.SPREADSHEET_ID,
+        range: range.split('!')[0] + '!A1', // force update starting A1
+        valueInputOption: 'USER_ENTERED',
+        resource: { values: finalData }
     });
 }
 
+// ---- 管理員：選單渲染 ----
+function renderAdminPanel() {
+    // 渲染「設定今日餐廳」選項
+    DOM.adminResSelect.innerHTML = '<option value="">請選擇餐廳</option>';
+    STATE.restaurants.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = r.name;
+        if (STATE.settings['TodayRestaurant'] === r.id) opt.selected = true;
+        DOM.adminResSelect.appendChild(opt);
+    });
+
+    // 渲染「餐廳清單」CRUD
+    DOM.adminResList.innerHTML = '';
+    STATE.restaurants.forEach(r => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${r.name}</span> <button data-id="${r.id}">刪除</button>`;
+        li.querySelector('button').addEventListener('click', () => handleDeleteRes(r.id));
+        DOM.adminResList.appendChild(li);
+    });
+
+    // 渲染「維護菜單：選取區」
+    DOM.adminMenuResSelect.innerHTML = '<option value="">選擇要編輯菜單的餐廳...</option>';
+    STATE.restaurants.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = r.name;
+        DOM.adminMenuResSelect.appendChild(opt);
+    });
+
+    loadAdminSummary();
+}
+
+// 餐廳新增
+DOM.btnAddRes.addEventListener('click', async () => {
+    const name = DOM.newResName.value.trim();
+    if(!name) return;
+    DOM.btnAddRes.disabled = true;
+    
+    const newId = generateId('R-');
+    STATE.restaurants.push({ id: newId, name: name });
+    
+    try {
+        const dataRows = STATE.restaurants.map(r => [r.id, r.name]);
+        await syncWholeSheet('Restaurants!A:B', ['ID', 'Name'], dataRows);
+        DOM.newResName.value = '';
+        renderAdminPanel();
+        showToast('新增餐廳成功');
+    } catch(err) {
+        showToast('新增失敗', true);
+    } finally {
+        DOM.btnAddRes.disabled = false;
+    }
+});
+
+// 餐廳刪除
+async function handleDeleteRes(id) {
+    if(!confirm('確定刪除此餐廳？(相關的菜單依然會留在後台)')) return;
+    STATE.restaurants = STATE.restaurants.filter(r => r.id !== id);
+    try {
+        const dataRows = STATE.restaurants.map(r => [r.id, r.name]);
+        await syncWholeSheet('Restaurants!A:B', ['ID', 'Name'], dataRows);
+        renderAdminPanel();
+        showToast('已刪除餐廳');
+    } catch(err) { showToast('刪除失敗', true);}
+}
+
+// 產生今日餐廳選定
 DOM.btnSaveRes.addEventListener('click', async () => {
     const selectedRes = DOM.adminResSelect.value;
     if (!selectedRes) return showToast('請選擇餐廳', true);
     
     DOM.btnSaveRes.disabled = true;
     try {
-        // 先抓 Settings 所有列來找 TodayRestaurant 在第幾列，為了簡化，實作時我們以覆蓋特定範圍更保險
-        // 但安全作法是呼叫 batchUpdate 或找尋鍵值。
-        // 為避免太複雜，預設我們要求設定檔把 TodayRestaurant 放在 Settings 的第一行紀錄中 (A2:B2)
-        // 較好的作法是直接去找 A 欄等於 TodayRestaurant 的 index，然後 update 它的 B 欄
-        
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'Settings!A:B'
-        });
+        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Settings!A:B' });
         const rows = response.result.values || [];
         let rowIndex = -1;
-        for(let i=0; i<rows.length; i++) {
-            if(rows[i][0] === 'TodayRestaurant') { rowIndex = i + 1; break; }
-        }
+        for(let i=0; i<rows.length; i++) { if(rows[i][0] === 'TodayRestaurant') { rowIndex = i + 1; break; } }
         
         if(rowIndex > 0) {
             await gapi.client.sheets.spreadsheets.values.update({
-                spreadsheetId: CONFIG.SPREADSHEET_ID,
-                range: `Settings!B${rowIndex}`,
-                valueInputOption: 'USER_ENTERED',
-                resource: { values: [[selectedRes]] }
+                spreadsheetId: CONFIG.SPREADSHEET_ID, range: `Settings!B${rowIndex}`, valueInputOption: 'USER_ENTERED', resource: { values: [[selectedRes]] }
             });
         } else {
-            // 新增一行
             await gapi.client.sheets.spreadsheets.values.append({
-                spreadsheetId: CONFIG.SPREADSHEET_ID,
-                range: 'Settings!A:B',
-                valueInputOption: 'USER_ENTERED',
-                insertDataOption: 'INSERT_ROWS',
-                resource: { values: [['TodayRestaurant', selectedRes]] }
+                spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Settings!A:B', valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', resource: { values: [['TodayRestaurant', selectedRes]] }
             });
         }
-
         STATE.settings['TodayRestaurant'] = selectedRes;
-        renderDashboard(); // 重新渲染今日菜單
-        showToast('發布成功！大家重新載入即可看到新菜單');
+        renderDashboard(); 
+        showToast('發布成功！');
+    } catch (err) { showToast('設定失敗', true); } 
+    finally { DOM.btnSaveRes.disabled = false; }
+});
 
-    } catch (err) {
-        showToast('設定失敗', true);
-        console.error(err);
-    } finally {
-        DOM.btnSaveRes.disabled = false;
+// 菜單維護區連動
+DOM.adminMenuResSelect.addEventListener('change', () => {
+    const resId = DOM.adminMenuResSelect.value;
+    if(resId) {
+        DOM.adminMenuEditor.classList.remove('hidden');
+        renderAdminMenuList(resId);
+    } else {
+        DOM.adminMenuEditor.classList.add('hidden');
     }
 });
 
+function renderAdminMenuList(resId) {
+    DOM.adminMenuList.innerHTML = '';
+    const items = STATE.menu.filter(m => m.resId === resId);
+    items.forEach(m => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+            <div style="flex:1;"><b>${m.name}</b> <span class="highlight">$${m.price}</span> <div class="text-sm">${m.customizations}</div></div>
+            <button data-id="${m.id}">刪除</button>
+        `;
+        li.querySelector('button').addEventListener('click', () => handleDeleteMenu(m.id, resId));
+        DOM.adminMenuList.appendChild(li);
+    });
+}
+
+DOM.btnAddMenu.addEventListener('click', async () => {
+    const resId = DOM.adminMenuResSelect.value;
+    const name = DOM.newMenuName.value.trim();
+    const price = parseInt(DOM.newMenuPrice.value);
+    const custom = DOM.newMenuCustom.value.trim();
+
+    if(!resId || !name || isNaN(price)) return showToast('資料不完整', true);
+    
+    DOM.btnAddMenu.disabled = true;
+    STATE.menu.push({ id: generateId('M-'), resId, name, price, customizations: custom });
+
+    try {
+        const dataRows = STATE.menu.map(m => [m.id, m.resId, m.name, m.price, m.customizations]);
+        await syncWholeSheet('Menu!A:E', ['ID', 'RestaurantID', 'Name', 'Price', 'Customizations'], dataRows);
+        
+        DOM.newMenuName.value = ''; DOM.newMenuPrice.value = ''; DOM.newMenuCustom.value = '';
+        renderAdminMenuList(resId);
+        showToast('新增餐點成功');
+    } catch(err) { showToast('新增失敗', true); }
+    finally { DOM.btnAddMenu.disabled = false; }
+});
+
+async function handleDeleteMenu(id, resId) {
+    if(!confirm('確定刪除這個餐點？')) return;
+    STATE.menu = STATE.menu.filter(m => m.id !== id);
+    try {
+        const dataRows = STATE.menu.map(m => [m.id, m.resId, m.name, m.price, m.customizations]);
+        await syncWholeSheet('Menu!A:E', ['ID', 'RestaurantID', 'Name', 'Price', 'Customizations'], dataRows);
+        renderAdminMenuList(resId);
+        showToast('刪除餐點成功');
+    } catch(err) { showToast('刪除失敗', true); }
+}
+
 async function loadAdminSummary() {
     try {
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: CONFIG.RANGES.ORDERS
-        });
+        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: CONFIG.RANGES.ORDERS });
         let rows = response.result.values || [];
         const todayRows = rows.filter(row => row[1] === STATE.todayDateStr && row[3] === DOM.todayResName.textContent);
         
         let summary = `【${DOM.todayResName.textContent} 點餐明細】\n`;
         let grandTotal = 0;
         todayRows.forEach(row => {
-            const userName = row[2] || '';
-            const itemName = row[4] || '';
-            const custom = row[5] ? `(${row[5]})` : '';
-            const qty = row[6] || 1;
-            const cost = parseInt(row[7]) || 0;
+            const userName = row[2] || ''; const itemName = row[4] || ''; const custom = row[5] ? `(${row[5]})` : '';
+            const qty = row[6] || 1; const cost = parseInt(row[7]) || 0;
             grandTotal += cost;
             summary += `${userName}：${itemName}${custom} x${qty} ($${cost})\n`;
         });
         summary += `\n結算總金額：$${grandTotal}`;
         DOM.orderSummaryText.value = summary;
+        DOM.orderSummaryText.classList.remove('hidden');
     } catch(e) {}
 }
 
 DOM.btnCopySummary.addEventListener('click', () => {
+    DOM.orderSummaryText.classList.remove('hidden');
     DOM.orderSummaryText.select();
     document.execCommand('copy');
     showToast('已複製明細內容！');
@@ -490,44 +631,20 @@ DOM.btnCopySummary.addEventListener('click', () => {
 
 DOM.btnClearOld.addEventListener('click', async () => {
     if(!confirm('這將刪除所有「非今日」或「非當前餐廳」的訂單，確定嗎？')) return;
-    
-    // 這個實作需要去讀取所有行，過濾掉不要的，然後清空並覆寫。
     DOM.btnClearOld.disabled = true;
     try {
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'Orders!A:H'
-        });
+        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
         let rows = response.result.values || [];
-        
-        // 假設第一行是標題，我們保留！
-        const titleRow = rows[0]; 
         const keepRows = rows.filter((row, i) => i === 0 || (row[1] === STATE.todayDateStr));
         
-        // 清空整個表
-        await gapi.client.sheets.spreadsheets.values.clear({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'Orders!A:H'
-        });
-        
-        // 重新寫入我們保留的 row
-        if (keepRows.length > 0) {
-            await gapi.client.sheets.spreadsheets.values.update({
-                spreadsheetId: CONFIG.SPREADSHEET_ID,
-                range: 'Orders!A1',
-                valueInputOption: 'USER_ENTERED',
-                resource: { values: keepRows }
-            });
-        }
+        await syncWholeSheet('Orders!A:H', keepRows[0] || ['OrderID', 'Date', 'UserName', 'RestaurantName', 'ItemName', 'CustomizationDetails', 'Quantity', 'TotalPrice'], keepRows.slice(1));
         showToast('清理完成');
     } catch(err) {
         showToast('清理失敗', true);
-        console.error(err);
     } finally {
         DOM.btnClearOld.disabled = false;
     }
 });
-
 
 // ---- 導航事件 ----
 DOM.navBtns.forEach(btn => {
@@ -535,12 +652,4 @@ DOM.navBtns.forEach(btn => {
         if (!btn.dataset.target) return;
         switchView(btn.dataset.target);
     });
-});
-
-DOM.logoutBtn.addEventListener('click', () => {
-    DOM.appView.classList.add('hidden');
-    DOM.loginView.classList.remove('hidden');
-    gapi.client.setToken('');
-    STATE.accessToken = null;
-    showToast('已登出');
 });
