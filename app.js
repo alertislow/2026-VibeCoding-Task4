@@ -96,7 +96,7 @@ const switchView = (targetId) => {
     DOM.sections.forEach(sec => sec.classList.remove('active'));
     document.getElementById(targetId).classList.add('active');
     DOM.navBtns.forEach(btn => {
-        if(btn.dataset.target === targetId) btn.classList.add('active');
+        if (btn.dataset.target === targetId) btn.classList.add('active');
         else btn.classList.remove('active');
     });
 
@@ -111,7 +111,7 @@ function generateId(prefix) {
 // ---- 初始化與認證 (與 localStorage) ----
 function initGoogleAPI() {
     const d = new Date();
-    DOM.dateDisplay.textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 菜單清單`;
+    DOM.dateDisplay.textContent = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 菜單清單`;
 
     STATE.tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CONFIG.CLIENT_ID,
@@ -121,12 +121,12 @@ function initGoogleAPI() {
                 const token = tokenResponse.access_token;
                 // 到期時間約 3599 秒
                 const expiresAt = new Date().getTime() + (tokenResponse.expires_in * 1000);
-                
+
                 try {
                     // Fetch user info with token
                     const userInfoResp = await fetch(`https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=${token}`);
                     const userInfo = await userInfoResp.json();
-                    
+
                     const sessionData = {
                         token: token,
                         expiresAt: expiresAt,
@@ -136,7 +136,7 @@ function initGoogleAPI() {
                     localStorage.setItem('vibe_session', JSON.stringify(sessionData));
                     loadSessionAndStartApp(sessionData);
 
-                } catch(e) {
+                } catch (e) {
                     setLoading(false);
                     showToast('獲取 Google 帳戶資訊失敗', true);
                 }
@@ -167,13 +167,13 @@ async function checkPersistedSession() {
 
 DOM.authBtn.addEventListener('click', () => {
     setLoading(true);
-    STATE.tokenClient.requestAccessToken({prompt: ''});
+    STATE.tokenClient.requestAccessToken({ prompt: '' });
 });
 
 async function loadSessionAndStartApp(sessionData) {
     STATE.user.name = sessionData.name;
     STATE.user.email = sessionData.email;
-    
+
     // Check role by email
     STATE.user.role = CONFIG.ADMIN_EMAILS.includes(sessionData.email) ? 'admin' : 'user';
 
@@ -183,20 +183,20 @@ async function loadSessionAndStartApp(sessionData) {
                 discoveryDocs: CONFIG.DISCOVERY_DOCS,
             });
             gapi.client.setToken({ access_token: sessionData.token });
-            
+
             // 介面轉換
             DOM.loginView.classList.add('hidden');
             DOM.appView.classList.remove('hidden');
             DOM.displayName.textContent = STATE.user.name;
             DOM.displayEmail.textContent = STATE.user.email;
             DOM.displayRole.textContent = STATE.user.role === 'admin' ? '管理員' : '一般用戶';
-            
+
             if (STATE.user.role === 'admin') {
                 DOM.adminOnlyEls.forEach(el => el.classList.remove('hidden'));
             } else {
                 DOM.adminOnlyEls.forEach(el => el.classList.add('hidden'));
                 DOM.navBtns.forEach(btn => {
-                    if(btn.dataset.target === 'admin-panel') btn.style.display = 'none';
+                    if (btn.dataset.target === 'admin-panel') btn.style.display = 'none';
                 });
             }
 
@@ -226,9 +226,9 @@ async function fetchData() {
             spreadsheetId: CONFIG.SPREADSHEET_ID,
             ranges: [CONFIG.RANGES.SETTINGS, CONFIG.RANGES.RESTAURANTS, CONFIG.RANGES.MENU]
         });
-        
+
         const valueRanges = response.result.valueRanges;
-        
+
         // Parse Settings
         let settingsRows = valueRanges[0].values || [];
         STATE.settings = {};
@@ -236,11 +236,11 @@ async function fetchData() {
 
         // Parse Restaurants array
         let resRows = valueRanges[1].values || [];
-        STATE.restaurants = resRows.filter(r=>r[0]).map(row => ({ id: row[0], name: row[1] }));
+        STATE.restaurants = resRows.filter(r => r[0]).map(row => ({ id: row[0], name: row[1] }));
 
         // Parse Menu array
         let menuRows = valueRanges[2].values || [];
-        STATE.menu = menuRows.filter(r=>r[0]).map(row => ({
+        STATE.menu = menuRows.filter(r => r[0]).map(row => ({
             id: row[0],
             resId: row[1],
             name: row[2],
@@ -248,10 +248,119 @@ async function fetchData() {
             customizations: row[4] || ''
         }));
 
+        await checkAndSeedData();
         renderDashboard();
     } catch (err) {
         showToast('載入資料失敗，若為首次使用可能您試算表無預期資料格式', true);
         console.error(err);
+    }
+}
+
+async function checkAndSeedData() {
+    try {
+        let dirtyRes = false;
+        let dirtyMenu = false;
+        let macResId = null;
+
+        const hasMac = STATE.restaurants.some(r => r.name === '麥當勞');
+        if (!hasMac) {
+            macResId = generateId('R-');
+            STATE.restaurants.push({ id: macResId, name: '麥當勞' });
+            dirtyRes = true;
+
+            const newMenuItems = [
+                { id: generateId('M-'), resId: macResId, name: '大麥克', price: 80, customizations: '套餐:單點,經典套餐,清爽套餐' },
+                { id: generateId('M-'), resId: macResId, name: '麥香魚', price: 60, customizations: '套餐:單點,經典套餐' },
+                { id: generateId('M-'), resId: macResId, name: '薯條', price: 40, customizations: '尺寸:小,中,大' },
+                { id: generateId('M-'), resId: macResId, name: '玉米湯', price: 40, customizations: '尺寸:小,大' },
+                { id: generateId('M-'), resId: macResId, name: '可樂', price: 33, customizations: '冰塊:正常,少冰,去冰;尺寸:小,中,大' }
+            ];
+            STATE.menu.push(...newMenuItems);
+            dirtyMenu = true;
+        }
+
+        const hasMoreRes = STATE.restaurants.some(r => r.name === '鼎泰豐');
+        if (!hasMoreRes) {
+            showToast('自動幫您建立其他 4 家餐廳與餐點...');
+            
+            const additionalRes = [
+                { name: '鼎泰豐', items: [
+                    { name: '小籠包', price: 230, custom: '份量:半籠,一籠' },
+                    { name: '排骨蛋炒飯', price: 280, custom: '飯:白米,糙米' },
+                    { name: '紅油抄手', price: 180, custom: '辣度:微辣,中辣,大辣' },
+                    { name: '酸辣湯', price: 100, custom: '尺寸:小,中,大' },
+                    { name: '元盅雞湯', price: 220, custom: '' }
+                ]},
+                { name: '八方雲集', items: [
+                    { name: '招牌鍋貼', price: 65, custom: '數量:10個,15個' },
+                    { name: '韭菜水餃', price: 65, custom: '數量:10個,15個' },
+                    { name: '古早味乾麵', price: 45, custom: '辣度:不辣,小辣' },
+                    { name: '玉米濃湯', price: 35, custom: '' },
+                    { name: '寒天真傳紅茶', price: 30, custom: '冰塊:正常,去冰;甜度:正常,半糖' }
+                ]},
+                { name: '健康小廚', items: [
+                    { name: '舒肥雞胸肉餐盒', price: 120, custom: '飯:紫米,白米,不飯換菜' },
+                    { name: '薄鹽烤鮭魚餐盒', price: 150, custom: '飯:紫米,白米,不飯換菜' },
+                    { name: '蒜香滷牛腱餐盒', price: 140, custom: '飯:紫米,白米,不飯換菜' },
+                    { name: '田園綜合鮮蔬餐', price: 100, custom: '醬料:和風,胡麻,不加醬' },
+                    { name: '無糖綠茶', price: 30, custom: '冰塊:正常,去冰' }
+                ]},
+                { name: '五十嵐', items: [
+                    { name: '1號(珍波椰青茶)', price: 45, custom: '冰塊:正常,少冰,去冰;甜度:正常,半糖,無糖' },
+                    { name: '波霸奶茶', price: 50, custom: '冰塊:正常,少冰,去冰;甜度:正常,半糖,無糖;尺寸:中,大' },
+                    { name: '四季春青茶', price: 35, custom: '冰塊:正常,去冰;甜度:正常,無糖' },
+                    { name: '冰淇淋紅茶', price: 50, custom: '冰塊:去冰;甜度:正常,無糖' },
+                    { name: '燕麥奶茶', price: 55, custom: '冰塊:正常,去冰;甜度:正常,半糖' }
+                ]}
+            ];
+
+            additionalRes.forEach(r => {
+                const resId = generateId('R-');
+                STATE.restaurants.push({ id: resId, name: r.name });
+                r.items.forEach(i => {
+                    STATE.menu.push({ id: generateId('M-'), resId, name: i.name, price: i.price, customizations: i.custom });
+                });
+            });
+            dirtyRes = true;
+            dirtyMenu = true;
+        }
+
+        if (dirtyRes) {
+            const resDataRows = STATE.restaurants.map(r => [r.id, r.name]);
+            await syncWholeSheet('Restaurants!A:B', ['ID', 'Name'], resDataRows);
+        }
+
+        if (dirtyMenu) {
+            const menuDataRows = STATE.menu.map(m => [m.id, m.resId, m.name, m.price, m.customizations]);
+            await syncWholeSheet('Menu!A:E', ['ID', 'RestaurantID', 'Name', 'Price', 'Customizations'], menuDataRows);
+        }
+
+        // 當第一次寫入麥當勞時才主動更改今日標記，其餘情況不影響正在用餐設定
+        if (!hasMac && macResId) {
+            STATE.settings['TodayRestaurant'] = macResId;
+            const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Settings!A:B' });
+            let rows = response.result.values || [];
+            let rowIndex = -1;
+            for (let i = 0; i < rows.length; i++) { if (rows[i][0] === 'TodayRestaurant') { rowIndex = i + 1; break; } }
+
+            if (rowIndex > 0) {
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID, range: `Settings!B${rowIndex}`, valueInputOption: 'USER_ENTERED', resource: { values: [[macResId]] }
+                });
+            } else {
+                await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Settings!A:B', valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', resource: { values: [['TodayRestaurant', macResId]] }
+                });
+            }
+        }
+
+        if (dirtyRes || dirtyMenu) {
+            showToast('預設資料建立完成！總計 5 家餐廳已寫入。');
+        }
+
+    } catch (err) {
+        console.error("AutoSeed Error", err);
+        showToast('自動建立資料時失敗: ' + (err.message || JSON.stringify(err)), true);
     }
 }
 
@@ -264,7 +373,7 @@ function getResName(id) {
 function renderDashboard() {
     DOM.menuContainer.innerHTML = '';
     const todayResId = STATE.settings['TodayRestaurant'];
-    
+
     if (!todayResId) {
         DOM.todayResName.textContent = "尚未設定";
         DOM.menuContainer.innerHTML = '<p class="text-sm">管理員尚未設定今日餐廳。</p>';
@@ -272,7 +381,7 @@ function renderDashboard() {
     }
 
     DOM.todayResName.textContent = getResName(todayResId);
-    
+
     const todayMenu = STATE.menu.filter(m => m.resId === todayResId);
     if (todayMenu.length === 0) {
         DOM.menuContainer.innerHTML = '<p class="text-sm">該餐廳尚未建置餐點。</p>';
@@ -312,12 +421,12 @@ function openOrderModal(item) {
             const parts = g.split(':');
             if (parts.length === 2) {
                 const labelName = parts[0].trim();
-                const options = parts[1].split(',').map(o=>o.trim());
-                
+                const options = parts[1].split(',').map(o => o.trim());
+
                 const groupDiv = document.createElement('div');
                 groupDiv.className = 'form-group';
                 groupDiv.innerHTML = `<label>${labelName}</label>`;
-                
+
                 const select = document.createElement('select');
                 select.className = 'custom-select';
                 select.dataset.label = labelName;
@@ -343,7 +452,7 @@ function updateModalPrice() {
 }
 
 DOM.qtyPlus.addEventListener('click', () => { DOM.qtyInput.value = parseInt(DOM.qtyInput.value) + 1; updateModalPrice(); });
-DOM.qtyMinus.addEventListener('click', () => { if(DOM.qtyInput.value > 1) { DOM.qtyInput.value = parseInt(DOM.qtyInput.value) - 1; updateModalPrice(); }});
+DOM.qtyMinus.addEventListener('click', () => { if (DOM.qtyInput.value > 1) { DOM.qtyInput.value = parseInt(DOM.qtyInput.value) - 1; updateModalPrice(); } });
 DOM.qtyInput.addEventListener('change', updateModalPrice);
 
 DOM.modalClose.addEventListener('click', () => { DOM.orderModal.classList.add('hidden'); });
@@ -354,7 +463,7 @@ DOM.btnSubmitOrder.addEventListener('click', async () => {
     const qty = parseInt(DOM.qtyInput.value) || 1;
     const total = qty * item.price;
     const remarks = DOM.remarksInput.value.trim();
-    
+
     let customArr = [];
     document.querySelectorAll('.custom-select').forEach(sel => customArr.push(`${sel.value}`));
     let customText = customArr.join(' / ');
@@ -362,7 +471,7 @@ DOM.btnSubmitOrder.addEventListener('click', async () => {
 
     const orderId = 'ORD-' + Date.now();
     const rowData = [
-        orderId, 
+        orderId,
         STATE.todayDateStr,
         STATE.user.name,
         DOM.todayResName.textContent,
@@ -402,27 +511,27 @@ async function loadTodayOrders() {
             spreadsheetId: CONFIG.SPREADSHEET_ID,
             range: CONFIG.RANGES.ORDERS
         });
-        
+
         let rows = response.result.values || [];
         let myTotal = 0; let allTotal = 0; let tableHTML = '';
-        
+
         const todayRows = rows.filter(row => row[1] === STATE.todayDateStr && row[3] === DOM.todayResName.textContent);
-        
+
         todayRows.forEach(row => {
             const userName = row[2] || '';
             const itemName = row[4] || '';
             const custom = row[5] || '';
             const qty = row[6] || '1';
             const cost = parseInt(row[7]) || 0;
-            
+
             allTotal += cost;
             if (userName === STATE.user.name) myTotal += cost;
-            
+
             tableHTML += `<tr><td>${userName}</td><td>${itemName}</td><td class="text-sm">${custom}</td><td>${qty}</td><td class="highlight">$${cost}</td></tr>`;
         });
-        
+
         if (todayRows.length === 0) tableHTML = '<tr><td colspan="5" style="text-align:center;">今日尚無人點餐。</td></tr>';
-        
+
         DOM.ordersTableBody.innerHTML = tableHTML;
         DOM.myTotalCost.textContent = `$${myTotal}`;
         DOM.allTotalCost.textContent = `$${allTotal}`;
@@ -485,19 +594,19 @@ function renderAdminPanel() {
 // 餐廳新增
 DOM.btnAddRes.addEventListener('click', async () => {
     const name = DOM.newResName.value.trim();
-    if(!name) return;
+    if (!name) return;
     DOM.btnAddRes.disabled = true;
-    
+
     const newId = generateId('R-');
     STATE.restaurants.push({ id: newId, name: name });
-    
+
     try {
         const dataRows = STATE.restaurants.map(r => [r.id, r.name]);
         await syncWholeSheet('Restaurants!A:B', ['ID', 'Name'], dataRows);
         DOM.newResName.value = '';
         renderAdminPanel();
         showToast('新增餐廳成功');
-    } catch(err) {
+    } catch (err) {
         showToast('新增失敗', true);
     } finally {
         DOM.btnAddRes.disabled = false;
@@ -506,29 +615,29 @@ DOM.btnAddRes.addEventListener('click', async () => {
 
 // 餐廳刪除
 async function handleDeleteRes(id) {
-    if(!confirm('確定刪除此餐廳？(相關的菜單依然會留在後台)')) return;
+    if (!confirm('確定刪除此餐廳？(相關的菜單依然會留在後台)')) return;
     STATE.restaurants = STATE.restaurants.filter(r => r.id !== id);
     try {
         const dataRows = STATE.restaurants.map(r => [r.id, r.name]);
         await syncWholeSheet('Restaurants!A:B', ['ID', 'Name'], dataRows);
         renderAdminPanel();
         showToast('已刪除餐廳');
-    } catch(err) { showToast('刪除失敗', true);}
+    } catch (err) { showToast('刪除失敗', true); }
 }
 
 // 產生今日餐廳選定
 DOM.btnSaveRes.addEventListener('click', async () => {
     const selectedRes = DOM.adminResSelect.value;
     if (!selectedRes) return showToast('請選擇餐廳', true);
-    
+
     DOM.btnSaveRes.disabled = true;
     try {
         const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Settings!A:B' });
         const rows = response.result.values || [];
         let rowIndex = -1;
-        for(let i=0; i<rows.length; i++) { if(rows[i][0] === 'TodayRestaurant') { rowIndex = i + 1; break; } }
-        
-        if(rowIndex > 0) {
+        for (let i = 0; i < rows.length; i++) { if (rows[i][0] === 'TodayRestaurant') { rowIndex = i + 1; break; } }
+
+        if (rowIndex > 0) {
             await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: CONFIG.SPREADSHEET_ID, range: `Settings!B${rowIndex}`, valueInputOption: 'USER_ENTERED', resource: { values: [[selectedRes]] }
             });
@@ -538,16 +647,16 @@ DOM.btnSaveRes.addEventListener('click', async () => {
             });
         }
         STATE.settings['TodayRestaurant'] = selectedRes;
-        renderDashboard(); 
+        renderDashboard();
         showToast('發布成功！');
-    } catch (err) { showToast('設定失敗', true); } 
+    } catch (err) { showToast('設定失敗', true); }
     finally { DOM.btnSaveRes.disabled = false; }
 });
 
 // 菜單維護區連動
 DOM.adminMenuResSelect.addEventListener('change', () => {
     const resId = DOM.adminMenuResSelect.value;
-    if(resId) {
+    if (resId) {
         DOM.adminMenuEditor.classList.remove('hidden');
         renderAdminMenuList(resId);
     } else {
@@ -575,31 +684,31 @@ DOM.btnAddMenu.addEventListener('click', async () => {
     const price = parseInt(DOM.newMenuPrice.value);
     const custom = DOM.newMenuCustom.value.trim();
 
-    if(!resId || !name || isNaN(price)) return showToast('資料不完整', true);
-    
+    if (!resId || !name || isNaN(price)) return showToast('資料不完整', true);
+
     DOM.btnAddMenu.disabled = true;
     STATE.menu.push({ id: generateId('M-'), resId, name, price, customizations: custom });
 
     try {
         const dataRows = STATE.menu.map(m => [m.id, m.resId, m.name, m.price, m.customizations]);
         await syncWholeSheet('Menu!A:E', ['ID', 'RestaurantID', 'Name', 'Price', 'Customizations'], dataRows);
-        
+
         DOM.newMenuName.value = ''; DOM.newMenuPrice.value = ''; DOM.newMenuCustom.value = '';
         renderAdminMenuList(resId);
         showToast('新增餐點成功');
-    } catch(err) { showToast('新增失敗', true); }
+    } catch (err) { showToast('新增失敗', true); }
     finally { DOM.btnAddMenu.disabled = false; }
 });
 
 async function handleDeleteMenu(id, resId) {
-    if(!confirm('確定刪除這個餐點？')) return;
+    if (!confirm('確定刪除這個餐點？')) return;
     STATE.menu = STATE.menu.filter(m => m.id !== id);
     try {
         const dataRows = STATE.menu.map(m => [m.id, m.resId, m.name, m.price, m.customizations]);
         await syncWholeSheet('Menu!A:E', ['ID', 'RestaurantID', 'Name', 'Price', 'Customizations'], dataRows);
         renderAdminMenuList(resId);
         showToast('刪除餐點成功');
-    } catch(err) { showToast('刪除失敗', true); }
+    } catch (err) { showToast('刪除失敗', true); }
 }
 
 async function loadAdminSummary() {
@@ -607,7 +716,7 @@ async function loadAdminSummary() {
         const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: CONFIG.RANGES.ORDERS });
         let rows = response.result.values || [];
         const todayRows = rows.filter(row => row[1] === STATE.todayDateStr && row[3] === DOM.todayResName.textContent);
-        
+
         let summary = `【${DOM.todayResName.textContent} 點餐明細】\n`;
         let grandTotal = 0;
         todayRows.forEach(row => {
@@ -619,7 +728,7 @@ async function loadAdminSummary() {
         summary += `\n結算總金額：$${grandTotal}`;
         DOM.orderSummaryText.value = summary;
         DOM.orderSummaryText.classList.remove('hidden');
-    } catch(e) {}
+    } catch (e) { }
 }
 
 DOM.btnCopySummary.addEventListener('click', () => {
@@ -630,16 +739,16 @@ DOM.btnCopySummary.addEventListener('click', () => {
 });
 
 DOM.btnClearOld.addEventListener('click', async () => {
-    if(!confirm('這將刪除所有「非今日」或「非當前餐廳」的訂單，確定嗎？')) return;
+    if (!confirm('這將刪除所有「非今日」或「非當前餐廳」的訂單，確定嗎？')) return;
     DOM.btnClearOld.disabled = true;
     try {
         const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
         let rows = response.result.values || [];
         const keepRows = rows.filter((row, i) => i === 0 || (row[1] === STATE.todayDateStr));
-        
+
         await syncWholeSheet('Orders!A:H', keepRows[0] || ['OrderID', 'Date', 'UserName', 'RestaurantName', 'ItemName', 'CustomizationDetails', 'Quantity', 'TotalPrice'], keepRows.slice(1));
         showToast('清理完成');
-    } catch(err) {
+    } catch (err) {
         showToast('清理失敗', true);
     } finally {
         DOM.btnClearOld.disabled = false;
