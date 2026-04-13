@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe 智慧點餐系統</title>
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- Google API Libraries -->
+    <script async defer src="https://apis.google.com/js/api.js"></script>
+    <script async defer src="https://accounts.google.com/gsi/client"></script>
+</head>
+<body>
+
+    <!-- 登入與角色設定畫面 -->
+    <div id="login-container" class="glass-panel active">
+        <div class="logo-box">
+            <div class="logo-icon">🥪</div>
+            <h1>Vibe 點餐系統</h1>
+        </div>
+        <p class="subtitle">歡迎來到內部專屬點餐小工具</p>
+        
+        <div class="login-form">
+            <div class="form-group">
+                <label for="user-name">您的稱呼</label>
+                <input type="text" id="user-name" placeholder="請輸入姓名 (例如: 王大明)">
+            </div>
+            <div class="form-group">
+                <label for="role-select">選擇身分</label>
+                <select id="role-select">
+                    <option value="user">我要點餐 (點餐者)</option>
+                    <option value="admin">我是管理者</option>
+                </select>
+            </div>
+            
+            <button id="auth-btn" class="primary-btn">
+                <span class="btn-text">登入 Google 帳號並進入系統</span>
+                <div class="loader hidden"></div>
+            </button>
+        </div>
+    </div>
+
+    <!-- 系統主要畫面 -->
+    <div id="app-container" class="app-layout hidden">
+        <!-- 側邊欄 -->
+        <aside class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <h2>Vibe 點餐</h2>
+                <div class="user-info">
+                    <span id="display-role" class="badge"></span>
+                    <span id="display-name"></span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-target="dashboard">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    首頁點餐
+                </button>
+                <button class="nav-btn" data-target="orders-view">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    今日訂單
+                </button>
+                <button class="nav-btn admin-only hidden" data-target="admin-panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    管理員控制台
+                </button>
+            </nav>
+            <button id="logout-btn" class="nav-btn logout">登出</button>
+        </aside>
+
+        <!-- 主內容區 -->
+        <main class="main-content">
+            
+            <!-- 首頁點餐區 -->
+            <section id="dashboard" class="view-section active">
+                <header class="section-header">
+                    <div>
+                        <h2>今日餐廳：<span id="today-restaurant-name" class="highlight">載入中...</span></h2>
+                        <p class="subtitle" id="date-display"></p>
+                    </div>
+                </header>
+                <div class="menu-grid" id="menu-container">
+                    <div class="loading-state">載入菜單中...</div>
+                </div>
+            </section>
+
+            <!-- 今日訂單區 -->
+            <section id="orders-view" class="view-section hidden">
+                <header class="section-header">
+                    <h2>大家今天的點餐</h2>
+                </header>
+                <div class="stats-cards">
+                    <div class="stat-card glass-panel">
+                        <h3>我的花費</h3>
+                        <div class="stat-value" id="my-total-cost">$0</div>
+                    </div>
+                    <div class="stat-card glass-panel">
+                        <h3>今日總金額</h3>
+                        <div class="stat-value highlight" id="all-total-cost">$0</div>
+                    </div>
+                </div>
+                <div class="table-container glass-panel">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>姓名</th>
+                                <th>餐點</th>
+                                <th>客製化/備註</th>
+                                <th>數量</th>
+                                <th>金額</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table-body">
+                            <!-- 訂單將會顯示在這裡 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 管理員面板 -->
+            <section id="admin-panel" class="view-section hidden admin-only">
+                <header class="section-header">
+                    <h2>管理控制台</h2>
+                </header>
+                <div class="admin-grid">
+                    <div class="admin-card glass-panel">
+                        <h3>設定今日餐廳</h3>
+                        <p class="text-sm">選擇要開放給大家點單的店家</p>
+                        <select id="admin-restaurant-select" class="form-control" style="margin-top: 10px;">
+                            <option value="">載入中...</option>
+                        </select>
+                        <button id="btn-save-restaurant" class="secondary-btn" style="margin-top: 15px;">儲存並發布</button>
+                    </div>
+
+                    <div class="admin-card glass-panel">
+                        <h3>維護餐廳與餐點資料</h3>
+                        <p class="text-sm">因為資料較多，請直接前往試算表介面維護</p>
+                        <a id="btn-open-gsheet" href="#" target="_blank" class="secondary-btn" style="display:inline-block; margin-top: 15px; text-decoration: none; text-align:center;">前往 Google 表單管理資料</a>
+                    </div>
+
+                    <div class="admin-card glass-panel" style="grid-column: 1 / -1;">
+                        <h3>收費小幫手</h3>
+                        <p class="text-sm">複製以下純文字明細，方便去 LINE 群組催繳便當錢</p>
+                        <textarea id="order-summary-text" class="form-control" rows="6" readonly style="margin-top: 10px; font-family: monospace;"></textarea>
+                        <button id="btn-copy-summary" class="primary-btn" style="margin-top: 10px;">一鍵複製明細</button>
+                    </div>
+
+                    <div class="admin-card glass-panel danger-zone">
+                        <h3>清理資料</h3>
+                        <p class="text-sm">如果你覺得試算表紀錄太多了，可以清除「非今日」所有的歷史訂單以保持系統輕量。</p>
+                        <button id="btn-clear-old" class="danger-btn" style="margin-top: 15px;">刪除非今日舊紀錄</button>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- 點餐 Modal -->
+    <div id="order-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3 id="modal-item-name">餐點名稱</h3>
+                <span class="price-tag" id="modal-item-price">$0</span>
+                <button class="close-btn" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 動態注入的客製化項目 -->
+                <div id="customizations-container"></div>
+                
+                <div class="form-group row-group">
+                    <label for="order-quantity">數量</label>
+                    <div class="stepper">
+                        <button id="qty-minus">-</button>
+                        <input type="number" id="order-quantity" value="1" min="1" max="99">
+                        <button id="qty-plus">+</button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="order-remarks">備註 (選填)</label>
+                    <input type="text" id="order-remarks" placeholder="例如：不要蔥">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="total-preview">總計：<span id="modal-total-price">$0</span></div>
+                <button id="btn-submit-order" class="primary-btn">確認送出訂單</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全局提示 Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
