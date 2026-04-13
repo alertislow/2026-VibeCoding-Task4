@@ -67,6 +67,12 @@ button {
 .danger-btn { background: var(--danger); color: #fff; padding: 10px 20px; }
 .danger-btn:hover { background: var(--danger-hover); }
 
+.icon-btn { background: transparent; padding: 4px; color: var(--text-muted); width: auto; font-size: 1.1rem; }
+.icon-btn:hover { color: #fff; transform: scale(1.1); }
+
+.action-btn { background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 6px; font-size: 1rem; color: var(--text-main); margin-right: 4px; }
+.action-btn:hover { background: rgba(255,255,255,0.15); transform: translateY(-1px); }
+
 /* Forms */
 .form-group { margin-bottom: 1.2rem; }
 .form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-muted); }

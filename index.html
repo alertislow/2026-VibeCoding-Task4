@@ -38,8 +38,8 @@
                 <div class="user-info">
                     <span id="display-role" class="badge"></span>
                     <span id="display-name"></span>
+                    <button id="btn-edit-name" class="icon-btn" title="修改暱稱">✏️</button>
                 </div>
-                <div id="display-email" class="text-sm" style="margin-top:5px; padding-left:2px;"></div>
             </div>
             <nav class="sidebar-nav">
                 <button class="nav-btn active" data-target="dashboard">
@@ -93,11 +93,13 @@
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th>日期</th>
                                 <th>姓名</th>
                                 <th>餐點</th>
                                 <th>客製化/備註</th>
                                 <th>數量</th>
                                 <th>金額</th>
+                                <th>操作</th>
                             </tr>
                         </thead>
                         <tbody id="orders-table-body">

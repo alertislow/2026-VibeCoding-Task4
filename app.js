@@ -7,7 +7,7 @@ const STATE = {
     settings: {}, // { TodayRestaurant: 'R01' }
     restaurants: [], // [{ id: 'R01', name: 'Mac' }]
     menu: [], // [{id, resId, name, price, customizations}]
-    todayDateStr: new Date().toISOString().split('T')[0],
+    todayDateStr: (function(){ const d=new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().split('T')[0]; })(),
     currentOrderItem: null
 };
 
@@ -22,6 +22,7 @@ const DOM = {
 
     displayRole: document.getElementById('display-role'),
     displayName: document.getElementById('display-name'),
+    btnEditName: document.getElementById('btn-edit-name'),
     displayEmail: document.getElementById('display-email'),
 
     navBtns: document.querySelectorAll('.nav-btn[data-target]'),
@@ -171,7 +172,8 @@ DOM.authBtn.addEventListener('click', () => {
 });
 
 async function loadSessionAndStartApp(sessionData) {
-    STATE.user.name = sessionData.name;
+    const customName = localStorage.getItem('vibe_custom_name');
+    STATE.user.name = customName ? customName : sessionData.name;
     STATE.user.email = sessionData.email;
 
     // Check role by email
@@ -188,7 +190,6 @@ async function loadSessionAndStartApp(sessionData) {
             DOM.loginView.classList.add('hidden');
             DOM.appView.classList.remove('hidden');
             DOM.displayName.textContent = STATE.user.name;
-            DOM.displayEmail.textContent = STATE.user.email;
             DOM.displayRole.textContent = STATE.user.role === 'admin' ? '管理員' : '一般用戶';
 
             if (STATE.user.role === 'admin') {
@@ -217,6 +218,19 @@ DOM.logoutBtn.addEventListener('click', () => {
     localStorage.removeItem('vibe_session');
     setLoading(false);
     showToast('已登出');
+});
+
+DOM.btnEditName.addEventListener('click', () => {
+    const newName = prompt('請輸入您的自訂暱稱（其他人也會看到這個名字）：', STATE.user.name);
+    if (newName && newName.trim() !== '') {
+        STATE.user.name = newName.trim();
+        localStorage.setItem('vibe_custom_name', STATE.user.name);
+        DOM.displayName.textContent = STATE.user.name;
+        showToast('暱稱已更新！');
+        if (document.getElementById('orders-view').classList.contains('active')) {
+            loadTodayOrders();
+        }
+    }
 });
 
 // ---- 資料存取 ----
@@ -408,6 +422,8 @@ function renderDashboard() {
 // ---- Modal 點餐邏輯 ----
 function openOrderModal(item) {
     STATE.currentOrderItem = item;
+    STATE.editingOrderId = null;
+    DOM.btnSubmitOrder.textContent = '確認送出訂單';
     DOM.modalItemName.textContent = item.name;
     DOM.modalItemPrice.textContent = `$${item.price}`;
     DOM.qtyInput.value = 1;
@@ -469,7 +485,8 @@ DOM.btnSubmitOrder.addEventListener('click', async () => {
     let customText = customArr.join(' / ');
     if (remarks) customText += ` (備註: ${remarks})`;
 
-    const orderId = 'ORD-' + Date.now();
+    const isEditing = !!STATE.editingOrderId;
+    const orderId = isEditing ? STATE.editingOrderId : ('ORD-' + Date.now());
     const rowData = [
         orderId,
         STATE.todayDateStr,
@@ -482,20 +499,38 @@ DOM.btnSubmitOrder.addEventListener('click', async () => {
     ];
 
     DOM.btnSubmitOrder.disabled = true;
-    DOM.btnSubmitOrder.textContent = '送出中...';
+    DOM.btnSubmitOrder.textContent = isEditing ? '儲存中...' : '送出中...';
 
     try {
-        await gapi.client.sheets.spreadsheets.values.append({
-            spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: 'Orders!A:H',
-            valueInputOption: 'USER_ENTERED',
-            insertDataOption: 'INSERT_ROWS',
-            resource: { values: [rowData] }
-        });
-        showToast('訂單送出成功！');
+        if (isEditing) {
+            const response = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, ranges: ['Orders!A:H'], includeGridData: true });
+            const sheetsResult = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
+            let rows = sheetsResult.result.values || [];
+            
+            for(let i = 0; i < rows.length; i++) {
+                if(rows[i][0] === orderId) {
+                    rows[i] = rowData;
+                    break;
+                }
+            }
+            await syncWholeSheet('Orders!A:H', rows[0], rows.slice(1));
+            showToast('訂單修改成功！');
+            STATE.editingOrderId = null;
+        } else {
+            await gapi.client.sheets.spreadsheets.values.append({
+                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                range: 'Orders!A:H',
+                valueInputOption: 'USER_ENTERED',
+                insertDataOption: 'INSERT_ROWS',
+                resource: { values: [rowData] }
+            });
+            showToast('訂單送出成功！');
+        }
+        
         DOM.orderModal.classList.add('hidden');
+        if (document.getElementById('orders-view').classList.contains('active')) loadTodayOrders();
     } catch (err) {
-        showToast('送出失敗', true);
+        showToast(isEditing ? '修改失敗' : '送出失敗', true);
         console.error(err);
     } finally {
         DOM.btnSubmitOrder.disabled = false;
@@ -509,15 +544,32 @@ async function loadTodayOrders() {
     try {
         const response = await gapi.client.sheets.spreadsheets.values.get({
             spreadsheetId: CONFIG.SPREADSHEET_ID,
-            range: CONFIG.RANGES.ORDERS
+            range: 'Orders!A:H'
         });
 
         let rows = response.result.values || [];
         let myTotal = 0; let allTotal = 0; let tableHTML = '';
 
-        const todayRows = rows.filter(row => row[1] === STATE.todayDateStr && row[3] === DOM.todayResName.textContent);
+        const todayRows = rows.filter(row => {
+            const resNameRaw = row[3] || '';
+            const isHeader = (row[0] || '').toLowerCase().includes('order');
+            if (isHeader) return false;
+            return resNameRaw === DOM.todayResName.textContent;
+        });
 
         todayRows.forEach(row => {
+            const orderId = row[0];
+            let dateDisplay = row[1] || '';
+            
+            // 轉換 Google Sheets 的 Serial Date (例: 46125 -> 2026-04-13)
+            if (/^\d+$/.test(dateDisplay)) {
+                const serial = parseInt(dateDisplay);
+                if (serial > 30000) {
+                    const jsDate = new Date((serial - 25569) * 86400 * 1000);
+                    dateDisplay = jsDate.getUTCFullYear() + '-' + String(jsDate.getUTCMonth() + 1).padStart(2, '0') + '-' + String(jsDate.getUTCDate()).padStart(2, '0');
+                }
+            }
+
             const userName = row[2] || '';
             const itemName = row[4] || '';
             const custom = row[5] || '';
@@ -527,18 +579,70 @@ async function loadTodayOrders() {
             allTotal += cost;
             if (userName === STATE.user.name) myTotal += cost;
 
-            tableHTML += `<tr><td>${userName}</td><td>${itemName}</td><td class="text-sm">${custom}</td><td>${qty}</td><td class="highlight">$${cost}</td></tr>`;
+            let actionHTML = '';
+            if (userName === STATE.user.name || STATE.user.role === 'admin') {
+                actionHTML = `
+                    <button class="action-btn" onclick="handleEditOrder('${orderId}')" title="編輯">✏️</button>
+                    <button class="action-btn" onclick="handleDeleteOrder('${orderId}')" title="刪除">🗑️</button>
+                `;
+            }
+
+            tableHTML += `<tr><td class="text-sm">${dateDisplay}</td><td>${userName}</td><td>${itemName}</td><td class="text-sm">${custom}</td><td>${qty}</td><td class="highlight">$${cost}</td><td>${actionHTML}</td></tr>`;
         });
 
-        if (todayRows.length === 0) tableHTML = '<tr><td colspan="5" style="text-align:center;">今日尚無人點餐。</td></tr>';
+        if (todayRows.length === 0) tableHTML = '<tr><td colspan="7" style="text-align:center;">該餐廳尚無任何點餐紀錄。</td></tr>';
 
         DOM.ordersTableBody.innerHTML = tableHTML;
         DOM.myTotalCost.textContent = `$${myTotal}`;
         DOM.allTotalCost.textContent = `$${allTotal}`;
     } catch (err) {
-        DOM.ordersTableBody.innerHTML = '<tr><td colspan="5">載入錯誤</td></tr>';
+        DOM.ordersTableBody.innerHTML = '<tr><td colspan="7">載入錯誤</td></tr>';
     }
 }
+
+window.handleDeleteOrder = async (orderId) => {
+    if (!confirm('確定要刪除這筆訂單嗎？')) return;
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
+        let rows = response.result.values || [];
+        const newRows = rows.filter(row => row[0] !== orderId);
+        
+        await syncWholeSheet('Orders!A:H', newRows[0] || ['OrderID', 'Date', 'UserName', 'RestaurantName', 'ItemName', 'CustomizationDetails', 'Quantity', 'TotalPrice'], newRows.slice(1));
+        showToast('訂單已刪除！');
+        loadTodayOrders();
+    } catch(err) {
+        showToast('刪除失敗', true);
+    }
+};
+
+window.handleEditOrder = async (orderId) => {
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: CONFIG.SPREADSHEET_ID, range: 'Orders!A:H' });
+        let rows = response.result.values || [];
+        const orderRow = rows.find(r => r[0] === orderId);
+        if(!orderRow) return showToast('找不到該訂單', true);
+
+        const itemName = orderRow[4];
+        const remarksStr = orderRow[5] || '';
+        const qty = parseInt(orderRow[6]) || 1;
+        
+        const menuItem = STATE.menu.find(m => m.name === itemName && m.resId === STATE.settings['TodayRestaurant']);
+        if(!menuItem) return showToast('菜單中已找不到該餐點，無法編輯', true);
+        
+        openOrderModal(menuItem);
+        STATE.editingOrderId = orderId;
+        DOM.qtyInput.value = qty;
+        updateModalPrice();
+        
+        if (remarksStr.includes('(備註:')) {
+            const remarkMatch = remarksStr.match(/\(備註:\s*(.*?)\)$/);
+            if(remarkMatch) DOM.remarksInput.value = remarkMatch[1].trim();
+        }
+
+        DOM.btnSubmitOrder.textContent = '儲存修改';
+
+    } catch(e) { showToast('讀取訂單失敗', true); }
+};
 
 // ---- 管理員核心：與試算表全覆寫 (CRUD Helper) ----
 async function syncWholeSheet(range, headerRow, dataArray) {
